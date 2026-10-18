@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/ffi", "crates/skia"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# The native library loads into other processes (the game), where a panic
+# must unwind to `guarded` and fail one call instead of aborting the host.
+[profile.native]
+inherits = "release"
+panic = "unwind"

@@ -1,0 +1,16 @@
+[package]
+name = "plusrenderer-skia"
+version = "0.1.0"
+edition = "2021"
+
+# Freya's own Skia build, so a Freya canvas and this crate share one `skia_safe`.
+# Keep in step with Freya's workspace pin (0.104 as of freya 0.5.0-rc.10). The features
+# are Freya's exact sets: Freya's fork only ships prebuilt binaries for those, anything
+# else builds Skia from source.
+[dependencies]
+plusrenderer = { path = "../core" }
+skia-safe = { package = "freya-skia-safe", version = "0.104.0", features = ["textlayout", "svg", "webp"] }
+
+[dev-dependencies]
+# `metrics`: Cmd/Ctrl+Shift+P overlay in debug builds.
+freya = { version = "=0.5.0-rc.10", features = ["metrics"] }

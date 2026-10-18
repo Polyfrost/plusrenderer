@@ -1,0 +1,12 @@
+{
+    "name": "@plusrenderer/renderer",
+    "version": "0.1.0",
+    "description": "WebGL2 adapter for the plusrenderer core",
+    "type": "module",
+    "main": "index.js",
+    "exports": {
+        ".": "./index.js",
+        "./plusrenderer.wasm": "./plusrenderer.wasm"
+    },
+    "files": ["index.js", "plusrenderer.wasm"]
+}

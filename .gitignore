@@ -1,0 +1,8 @@
+target/
+node_modules/
+dist/
+packages/renderer/plusrenderer.wasm
+java/build/
+java/.gradle/
+
+.DS_Store

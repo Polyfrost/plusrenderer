@@ -1,0 +1,14 @@
+[package]
+name = "plusrenderer-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+plusrenderer = { path = "../core" }
+
+# JNI for the `java/` library. It's the same native lib, so the C ABI (JNA) keeps working beside it.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+jni = "0.21"

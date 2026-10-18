@@ -1,0 +1,13 @@
+{
+    "name": "plusrenderer",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@12.4.1",
+    "scripts": {
+        "wasm": "scripts/build-wasm.sh",
+        "dev": "pnpm run wasm && pnpm --filter @plusrenderer/demo dev",
+        "build": "pnpm run wasm && pnpm --filter @plusrenderer/demo build",
+        "preview": "pnpm --filter @plusrenderer/demo preview",
+        "test": "cargo test"
+    }
+}

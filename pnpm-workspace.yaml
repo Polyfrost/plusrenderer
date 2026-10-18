@@ -1,0 +1,6 @@
+packages:
+    - packages/*
+
+# esbuild links its platform binary in a postinstall, and vite needs it.
+allowBuilds:
+    esbuild: true

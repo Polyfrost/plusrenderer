@@ -1,0 +1,78 @@
+# Push a `v*` tag: the jar (every platform's native inside) goes to Reposilite, and the jar,
+# the npm tarball and the wasm go on the GitHub release. Rust users depend on the tag directly.
+#
+# Repository settings: variable REPOSILITE_URL (e.g. https://repo.example.org/releases),
+# secrets REPOSILITE_USERNAME and REPOSILITE_TOKEN (a Reposilite token with write access).
+name: Release
+
+on:
+    push:
+        tags: ["v*"]
+
+jobs:
+    natives:
+        strategy:
+            matrix:
+                include:
+                    - { os: macos-latest, target: aarch64-apple-darwin }
+                    - { os: macos-latest, target: x86_64-apple-darwin }
+                    # 22.04 for an older glibc floor.
+                    - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+                    - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+                    - { os: windows-latest, target: x86_64-pc-windows-msvc }
+                    - { os: windows-latest, target: aarch64-pc-windows-msvc }
+        runs-on: ${{ matrix.os }}
+        steps:
+            - uses: actions/checkout@v5
+            - uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: "1.97"
+                  targets: ${{ matrix.target }}
+            - run: sh scripts/build-native.sh out ${{ matrix.target }}
+              shell: bash
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: natives-${{ matrix.target }}
+                  path: out/
+                  if-no-files-found: error
+
+    publish:
+        needs: natives
+        runs-on: ubuntu-22.04
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v5
+            - uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: "1.97"
+                  targets: wasm32-unknown-unknown
+            - uses: actions/download-artifact@v4
+              with:
+                  pattern: natives-*
+                  path: target/java-resources
+                  merge-multiple: true
+            - run: find target/java-resources -type f
+            - uses: actions/setup-java@v5
+              with:
+                  distribution: temurin
+                  java-version: |
+                      8
+                      21
+            - uses: gradle/actions/setup-gradle@v4
+            # Named task: fails if REPOSILITE_URL is unset instead of publishing nowhere.
+            - run: ./gradlew test publishMavenPublicationToReposiliteRepository -Pversion="${GITHUB_REF_NAME#v}"
+              working-directory: java
+              env:
+                  ORG_GRADLE_PROJECT_reposiliteUrl: ${{ vars.REPOSILITE_URL }}
+                  ORG_GRADLE_PROJECT_reposiliteUsername: ${{ secrets.REPOSILITE_USERNAME }}
+                  ORG_GRADLE_PROJECT_reposilitePassword: ${{ secrets.REPOSILITE_TOKEN }}
+            - run: scripts/build-wasm.sh
+            - run: npm pkg set version="${GITHUB_REF_NAME#v}" && npm pack
+              working-directory: packages/renderer
+            - uses: softprops/action-gh-release@v2
+              with:
+                  files: |
+                      java/build/libs/*.jar
+                      packages/renderer/*.tgz
+                      packages/renderer/plusrenderer.wasm
