@@ -133,7 +133,7 @@ impl BodySlot {
 }
 
 /// Matched as the client does: case-insensitive, underscores ignored. Its `helmet` is our `hat`.
-fn player_bone(name: &str) -> Option<&'static str> {
+pub(crate) fn player_bone(name: &str) -> Option<&'static str> {
     let key: String = name
         .chars()
         .filter(|&c| c != '_')

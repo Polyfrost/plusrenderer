@@ -129,8 +129,16 @@ impl Animation {
         self.blend_weight.eval(rt)
     }
 
+    /// Player bones match as the client does, so `left_arm` drives `leftArm`.
     pub fn bind(&self, model: &Model) -> Vec<Option<usize>> {
-        self.bones.iter().map(|b| model.bone(&b.name)).collect()
+        self.bones
+            .iter()
+            .map(|b| {
+                model.bone(&b.name).or_else(|| {
+                    crate::cosmetic::player_bone(&b.name).and_then(|name| model.bone(name))
+                })
+            })
+            .collect()
     }
 }
 
