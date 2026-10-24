@@ -67,11 +67,10 @@ mod tests {
     use crate::player::{self, Arms};
     use crate::pose::{world_transforms, Pose};
 
-    fn rest(bone: &str, arms: Arms) -> [f32; 3] {
-        let arm_y = if arms == Arms::Slim { 2.5 } else { 2.0 };
+    fn rest(bone: &str) -> [f32; 3] {
         match bone {
-            "rightArm" => [-5.0, arm_y, 0.0],
-            "leftArm" => [5.0, arm_y, 0.0],
+            "rightArm" => [-5.0, 2.0, 0.0],
+            "leftArm" => [5.0, 2.0, 0.0],
             "rightLeg" => [-1.9, 12.0, 0.0],
             "leftLeg" => [1.9, 12.0, 0.0],
             _ => [0.0; 3],
@@ -98,7 +97,7 @@ mod tests {
                 let mut core = Vec::new();
                 world_transforms(&model, Some(&pose), |_| None, &mut core);
 
-                let rest = rest(bone, arms);
+                let rest = rest(bone);
                 let delta = part_delta(&pose.0[i]);
                 let game = Part {
                     offset: std::array::from_fn(|k| rest[k] + delta.offset[k]),

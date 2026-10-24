@@ -71,6 +71,9 @@ mod tests {
         assert_eq!(w.size[0], 4.0);
         assert_eq!(s.size[0], 3.0);
         assert_eq!(w.origin[0] + w.size[0], s.origin[0] + s.size[0]);
+        // Only the width shrinks, the arm keeps its height and shoulder line.
+        assert_eq!(w.origin[1..], s.origin[1..]);
+        assert_eq!(w.size[1..], s.size[1..]);
     }
 
     #[test]
