@@ -171,19 +171,41 @@ fn attach(model: &mut Model, slot: BodySlot, anchor: Option<&'static str>) {
     }
 
     let has_cubes = subtree_has_cubes(model);
-    for (i, &renderable) in has_cubes.iter().enumerate() {
-        if !renderable || !is_attachment_root(model, i) {
-            continue;
-        }
-        let Some(target) = anchor.or_else(|| target_for(model, i, slot)) else {
-            continue;
-        };
+    let roots: Vec<(usize, Option<&'static str>)> = (0..model.bones.len())
+        .filter(|&i| has_cubes[i] && is_attachment_root(model, i))
+        .map(|i| (i, anchor.or_else(|| target_for(model, i, slot))))
+        .collect();
 
-        // Detached from any in-file parent, as the client does.
+    let mut tops: Vec<usize> = roots.iter().map(|&(i, _)| top_ancestor(model, i)).collect();
+    tops.sort_unstable();
+    tops.dedup();
+
+    let mut attach = Vec::new();
+    for top in tops {
+        let group: Vec<_> = roots
+            .iter()
+            .filter(|&&(i, _)| top_ancestor(model, i) == top)
+            .collect();
+        let first = group[0].1;
+        let shared = first.filter(|_| group.iter().all(|&&(_, t)| t == first));
+        match shared {
+            Some(target) if model.bone(target).is_none() => attach.push((top, target)),
+            _ => attach.extend(group.iter().filter_map(|&&(i, t)| Some((i, t?)))),
+        }
+    }
+
+    for (i, target) in attach {
         let bone = &mut model.bones[i];
         bone.parent = None;
         bone.parent_name = Some(target.to_string());
     }
+}
+
+fn top_ancestor(model: &Model, mut i: usize) -> usize {
+    while let Some(p) = model.bones[i].parent {
+        i = p;
+    }
+    i
 }
 
 fn is_attachment_root(model: &Model, i: usize) -> bool {
@@ -334,16 +356,38 @@ mod tests {
         attach(&mut hat, BodySlot::Hat, None);
         assert_eq!(parent_of(&hat, "bb_main"), Some("head"));
 
-        // The cube-less grouping bone is left behind, as in the client.
         let mut wings = model(
             r#"[{"name":"wings","pivot":[0,3,-1]},
                 {"name":"leftWing","parent":"wings","pivot":[-1,20,2],"cubes":[{"origin":[-33,20,2],"size":[32,16,0],"uv":[0,0]}]}]"#,
         );
         attach(&mut wings, BodySlot::Wings, None);
         let left = wings.bone("leftWing").unwrap();
-        assert_eq!(wings.bones[left].parent, None);
-        assert_eq!(parent_of(&wings, "leftWing"), Some("body"));
-        assert_eq!(parent_of(&wings, "wings"), None);
+        assert_eq!(wings.bones[left].parent, wings.bone("wings"));
+        assert_eq!(parent_of(&wings, "wings"), Some("body"));
+    }
+
+    #[test]
+    fn parts_sharing_a_group_and_target_stay_together() {
+        let mut hat = model(
+            r#"[{"name":"hat","pivot":[0,24,0],"rotation":[0,0,10]},
+                {"name":"crown","parent":"hat","pivot":[0,24,0],"cubes":[{"origin":[-4,32,-4],"size":[8,2,8],"uv":[0,0]}]},
+                {"name":"feather","parent":"hat","pivot":[0,24,0],"cubes":[{"origin":[2,34,0],"size":[1,4,1],"uv":[0,0]}]}]"#,
+        );
+        attach(&mut hat, BodySlot::Hat, None);
+        let group = hat.bone("hat");
+        for name in ["crown", "feather"] {
+            assert_eq!(hat.bones[hat.bone(name).unwrap()].parent, group, "{name}");
+        }
+
+        let mut gloves = model(
+            r#"[{"name":"gloves","pivot":[0,0,0]},
+                {"name":"left","parent":"gloves","pivot":[0,0,0],"cubes":[{"origin":[4,12,-2],"size":[4,4,4],"uv":[0,0]}]},
+                {"name":"right","parent":"gloves","pivot":[0,0,0],"cubes":[{"origin":[-8,12,-2],"size":[4,4,4],"uv":[0,0]}]}]"#,
+        );
+        attach(&mut gloves, BodySlot::LeftHand, None);
+        assert_eq!(parent_of(&gloves, "left"), Some("leftArm"));
+        assert_eq!(parent_of(&gloves, "right"), Some("rightArm"));
+        assert_eq!(parent_of(&gloves, "gloves"), None);
     }
 
     #[test]
