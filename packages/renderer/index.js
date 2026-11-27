@@ -29,6 +29,24 @@ void main() {
 
 export const defaultWasmUrl = new URL("./plusrenderer.wasm", import.meta.url);
 
+export const PREVIEW_WEARER = 0xffffffffffffffffn;
+export const EFFECT_EVENT_INTS = 6;
+export const EFFECT_PARTICLE = 0;
+export const EFFECT_SOUND = 1;
+export const MOTION_FULL = 0;
+export const MOTION_REDUCED = 1;
+export const MOTION_OFF = 2;
+export const SLOTS = 256;
+
+function wearerId(wearer) {
+    return BigInt.asUintN(64, BigInt(wearer));
+}
+
+function slotOf(slot) {
+    if (!Number.isInteger(slot) || slot < 0 || slot >= SLOTS) throw new RangeError(`no slot ${slot}, the last is ${SLOTS - 1}`);
+    return slot;
+}
+
 function compile(gl, type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
@@ -107,9 +125,12 @@ export class Renderer {
     }
 
     withStrings(strings, fn) {
+        return this.withBytes(strings.map((s) => new TextEncoder().encode(s)), fn);
+    }
+
+    withBytes(chunks, fn) {
         const args = [];
-        for (const s of strings) {
-            const bytes = new TextEncoder().encode(s);
+        for (const bytes of chunks) {
             const ptr = this.wasm.alloc(bytes.length);
             new Uint8Array(this.memory(), ptr, bytes.length).set(bytes);
             args.push(ptr, bytes.length);
@@ -133,10 +154,11 @@ export class Renderer {
 
     loadPlayer(slot, slim) {
         this.dirty = true;
-        this.wasm.renderer_load_player(this.handle, slot, slim ? 1 : 0);
+        this.wasm.renderer_load_player(this.handle, slotOf(slot), slim ? 1 : 0);
     }
 
     loadCosmetic(slot, json, bodySlot, image, anchor = "") {
+        slotOf(slot);
         this.dirty = true;
         this.check(this.withStrings([json, bodySlot, anchor], (ptr, len, bodyPtr, bodyLen, anchorPtr, anchorLen) =>
             this.wasm.renderer_load_cosmetic(
@@ -158,15 +180,41 @@ export class Renderer {
 
     loadCapeModel(load, slot, still, sheet, sheetName) {
         const frames = this.withStrings([sheetName], (ptr, len) =>
-            load(this.handle, slot, still.width, still.height, sheet?.width ?? 0, sheet?.height ?? 0, ptr, len),
+            load(this.handle, slotOf(slot), still.width, still.height, sheet?.width ?? 0, sheet?.height ?? 0, ptr, len),
         );
+        this.check(frames);
         this.setTexture(slot, frames > 1 ? sheet : still);
     }
 
     loadAnimation(slot, json) {
         this.dirty = true;
         this.check(this.withStrings([json], (ptr, len) =>
-            this.wasm.renderer_load_animation(this.handle, slot, ptr, len),
+            this.wasm.renderer_load_animation(this.handle, slotOf(slot), ptr, len),
+        ));
+    }
+
+    loadControllers(slot, json, files, declared = []) {
+        slotOf(slot);
+        this.dirty = true;
+        const encoder = new TextEncoder();
+        const contents = files.map((file) =>
+            typeof file.bytes === "string" ? encoder.encode(file.bytes) : new Uint8Array(file.bytes),
+        );
+        const data = new Uint8Array(contents.reduce((total, bytes) => total + bytes.length, 0));
+        contents.reduce((at, bytes) => (data.set(bytes, at), at + bytes.length), 0);
+        const sizes = new Uint8Array(new Uint32Array(contents.map((bytes) => bytes.length)).buffer);
+        const chunks = [
+            encoder.encode(json),
+            encoder.encode(files.map((file) => file.name).join("\n")),
+            data,
+            sizes,
+            encoder.encode(declared.join("\n")),
+        ];
+        this.check(this.withBytes(chunks, (ptr, len, namesPtr, namesLen, dataPtr, dataLen, sizesPtr, _, declaredPtr, declaredLen) =>
+            this.wasm.renderer_load_controllers(
+                this.handle, slot, ptr, len, namesPtr, namesLen, dataPtr, dataLen, sizesPtr, files.length,
+                declaredPtr, declaredLen,
+            ),
         ));
     }
 
@@ -177,29 +225,80 @@ export class Renderer {
         );
     }
 
+    bundleControllers(paths) {
+        return this.withStrings([paths.join("\n")], (ptr, len) => {
+            const count = this.wasm.bundle_controllers(ptr, len, 0, 0);
+            if (count === 0) return [];
+            const out = this.wasm.alloc(count * 4);
+            try {
+                this.wasm.bundle_controllers(ptr, len, out, count);
+                return Array.from(this.words(out, count));
+            } finally {
+                this.wasm.dealloc(out, count * 4);
+            }
+        });
+    }
+
+    effectEvents() {
+        const count = this.wasm.renderer_effect_events(this.handle, 0, 0);
+        if (count === 0) return new Uint32Array(0);
+        const ints = count * EFFECT_EVENT_INTS;
+        const out = this.wasm.alloc(ints * 4);
+        try {
+            this.wasm.renderer_effect_events(this.handle, out, ints);
+            return this.words(out, ints);
+        } finally {
+            this.wasm.dealloc(out, ints * 4);
+        }
+    }
+
+    words(ptr, count) {
+        return new Uint32Array(new Uint8Array(this.memory(), ptr, count * 4).slice().buffer);
+    }
+
+    controllerState(slot, controller, wearer = PREVIEW_WEARER) {
+        for (let nameLen = 256; ;) {
+            const size = nameLen;
+            const name = this.wasm.alloc(size);
+            const seconds = this.wasm.alloc(4);
+            try {
+                const len = this.wasm.renderer_controller_state(this.handle, slot, wearerId(wearer), controller, name, size, seconds);
+                if (len < 0) return null;
+                if (len <= size) {
+                    const state = new TextDecoder().decode(new Uint8Array(this.memory(), name, len));
+                    return { state, seconds: new DataView(this.memory(), seconds, 4).getFloat32(0, true) };
+                }
+                nameLen = len;
+            } finally {
+                this.wasm.dealloc(name, size);
+                this.wasm.dealloc(seconds, 4);
+            }
+        }
+    }
+
     play(slot, at) {
         this.dirty = true;
-        this.wasm.renderer_play(this.handle, slot, at);
+        this.wasm.renderer_play_f64(this.handle, slotOf(slot), at);
     }
 
     stop(slot) {
         this.dirty = true;
-        this.wasm.renderer_stop(this.handle, slot);
+        this.wasm.renderer_stop(this.handle, slotOf(slot));
     }
 
     // "standing" (also swimming), "crouching" or "flying". `fall` is how steeply it dives, 0..1.
     setElytraPose(slot, pose, fall = 0) {
-        this.wasm.renderer_set_elytra_pose(this.handle, slot, ["standing", "crouching", "flying"].indexOf(pose), fall);
+        this.wasm.renderer_set_elytra_pose(this.handle, slotOf(slot), ["standing", "crouching", "flying"].indexOf(pose), fall);
     }
 
     setVisible(slot, visible) {
         this.dirty = true;
-        this.wasm.renderer_set_visible(this.handle, slot, visible ? 1 : 0);
+        this.wasm.renderer_set_visible(this.handle, slotOf(slot), visible ? 1 : 0);
     }
 
     clear(slot) {
         this.dirty = true;
-        this.wasm.renderer_clear(this.handle, slot);
+        this.wasm.renderer_clear(this.handle, slotOf(slot));
         if (this.textures[slot]) this.gl.deleteTexture(this.textures[slot]);
         this.textures[slot] = undefined;
     }
@@ -208,6 +307,39 @@ export class Renderer {
     setLightLevel(level) {
         this.dirty = true;
         this.wasm.renderer_set_light_level(this.handle, level);
+    }
+
+    setSignalOverride(signal, value, wearer = PREVIEW_WEARER) {
+        this.dirty = true;
+        this.check(this.wasm.renderer_set_signal_override(this.handle, wearerId(wearer), signal, value));
+    }
+
+    setMotion(motion) {
+        this.dirty = true;
+        this.check(this.wasm.renderer_set_motion(this.handle, motion));
+    }
+
+    forgetWearer(wearer) {
+        this.dirty = true;
+        return this.wasm.renderer_forget_wearer(this.handle, wearerId(wearer)) !== 0;
+    }
+
+    breakRings(wearer) {
+        this.dirty = true;
+        return this.wasm.renderer_break_rings(this.handle, wearerId(wearer)) !== 0;
+    }
+
+    setSeedWearer(wearer, seedWearer) {
+        this.dirty = true;
+        this.wasm.renderer_set_seed_wearer(this.handle, wearerId(wearer), wearerId(seedWearer));
+    }
+
+    wearerCount() {
+        return this.wasm.renderer_wearer_count(this.handle) >>> 0;
+    }
+
+    wearerBytes() {
+        return this.wasm.renderer_wearer_bytes(this.handle) >>> 0;
     }
 
     setTexture(slot, image) {
@@ -243,7 +375,7 @@ export class Renderer {
         this.dirty = false;
         this.lastFrame = key;
 
-        const indexCount = this.wasm.renderer_build(
+        const indexCount = this.wasm.renderer_build_f64(
             this.handle,
             camera.yaw,
             camera.pitch,

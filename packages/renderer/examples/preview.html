@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cosmetic preview</title>
+<style>
+    :root {
+        color-scheme: light dark;
+        --bg: #f4f4f6;
+        --panel: #ffffff;
+        --text: #1d1d22;
+        --muted: #6a6a75;
+        --stage: #7aa7d8;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #16161a;
+            --panel: #202026;
+            --text: #ececf1;
+            --muted: #9a9aa6;
+            --stage: #2f4a68;
+        }
+    }
+    body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.4 system-ui, sans-serif;
+    }
+    main {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 16px;
+    }
+    canvas {
+        display: block;
+        width: 100%;
+        height: 420px;
+        background: var(--stage);
+        border-radius: 8px;
+        touch-action: none;
+        cursor: grab;
+    }
+    form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 12px 0;
+        padding: 12px;
+        background: var(--panel);
+        border-radius: 8px;
+    }
+    label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 12px;
+    }
+    label.check {
+        flex-direction: row;
+        align-items: center;
+        align-self: end;
+    }
+    output {
+        display: block;
+        color: var(--muted);
+        white-space: pre-wrap;
+        font-size: 12px;
+    }
+</style>
+</head>
+<body>
+<main>
+    <canvas id="stage"></canvas>
+    <form id="samples">
+        <button type="button" data-sample="item">Item</button>
+        <button type="button" data-sample="effect">Effect</button>
+        <button type="button" data-sample="emote">Emote</button>
+        <button type="button" data-sample="duo">Duo emote</button>
+        <button type="button" data-sample="pet">Pet</button>
+        <button type="button" data-sample="pets">Two pets</button>
+        <button type="button" data-sample="clear">Clear</button>
+        <label>Your bundle <input id="bundle" type="file" accept=".zip"></label>
+        <label>Skin <input id="skin" type="file" accept="image/png"></label>
+        <label class="check"><input id="slim" type="checkbox"> Slim arms</label>
+    </form>
+    <form id="worn">
+        <label>Colourway <select id="colorway"><option value="-1">Default</option></select></label>
+        <label>Custom colour <input id="custom" type="color" value="#304050"></label>
+        <label class="check"><input id="use-custom" type="checkbox"> Use it</label>
+        <label>Effect <select id="effect"></select></label>
+        <button type="button" id="fire">Play effect</button>
+    </form>
+    <form id="signals">
+        <label class="check"><input data-signal="is_in_rain" type="checkbox"> Rain</label>
+        <label class="check"><input data-signal="is_sneaking" type="checkbox"> Sneaking</label>
+        <label class="check"><input data-signal="is_in_combat" type="checkbox"> In combat</label>
+        <label class="check"><input data-signal="is_moving" type="checkbox"> Moving</label>
+        <button type="button" id="hurt">Hurt</button>
+        <button type="button" id="jump">Jump</button>
+        <label>Light <input id="light" type="range" min="0" max="15" value="15"></label>
+        <label class="check"><input id="mute" type="checkbox"> Mute</label>
+    </form>
+    <form id="session">
+        <button type="button" id="play">Play</button>
+        <button type="button" id="pause">Pause</button>
+        <button type="button" id="stop">Stop</button>
+        <label>Time <input id="time" type="range" min="0" max="1" step="0.01" value="0"></label>
+        <label class="check"><input id="loop" type="checkbox" checked> Loop</label>
+        <label>Pets <select id="interaction"><option value="">Idle</option><option value="auto">Pair seed picks</option></select></label>
+    </form>
+    <output id="status"></output>
+</main>
+<script type="module">
+import { PreviewPlayer, EVENT_JUMP, NO_COLORWAY } from "../preview.js";
+
+const DATA = new URL("../../../crates/core/tests/data/", import.meta.url);
+const SKIN = new URL("../../demo/public/skin.png", import.meta.url);
+const WINGS = ["manifest.json", "palettes.json", "models/wings.geo.json", "textures/wings.png", "textures/wings.idx.png",
+    "animations/wings.animation.json", "animation_controllers/wings.animation_controllers.json"];
+const SPARK = ["manifest.json", "particles/spark.json", "sounds/pop.ogg", "textures/particle/spark.png", "textures/ribbon.png"];
+
+const $ = (id) => document.getElementById(id);
+const encode = (value) => new TextEncoder().encode(JSON.stringify(value));
+const canvas = $("stage");
+const status = $("status");
+
+async function fetchFiles(folder, names) {
+    const files = {};
+    for (const name of names) {
+        const response = await fetch(new URL(`${folder}/${name}`, DATA));
+        if (!response.ok) throw new Error(`Couldn't load ${folder}/${name}. Serve the plusrenderer repo root.`);
+        files[name] = new Uint8Array(await response.arrayBuffer());
+    }
+    return files;
+}
+
+const wings = await fetchFiles("sample_wings", WINGS);
+const spark = await fetchFiles("sample_spark", SPARK);
+
+function wave() {
+    return {
+        "manifest.json": encode({ format: 1, kind: "emote", id: "wave", animations: ["wave"] }),
+        "animations/wave.animation.json": encode({
+            format_version: "1.8.0",
+            animations: {
+                "animation.wave.main": {
+                    animation_length: 2,
+                    bones: { rightArm: { rotation: { "0.0": [0, 0, 0], "0.4": [0, 0, 150], "0.8": [0, 0, 120], "1.2": [0, 0, 150], "1.6": [0, 0, 120], "2.0": [0, 0, 0] } } },
+                },
+            },
+        }),
+    };
+}
+
+function highFive() {
+    return {
+        "manifest.json": encode({
+            format: 1, kind: "emote", id: "high_five", requires: ["roles"], animations: ["five"],
+            roles: [
+                { id: "a", animation: "left" },
+                { id: "b", animation: "right", offset: [0, 0, 1.2], yaw: 180 },
+            ],
+        }),
+        "animations/five.animation.json": encode({
+            format_version: "1.8.0",
+            animations: {
+                "animation.five.left": { animation_length: 1.2, bones: { rightArm: { rotation: { "0.0": [0, 0, 0], "0.6": [-160, 0, 0], "1.2": [-160, 0, 0] } } } },
+                "animation.five.right": { animation_length: 1.2, bones: { leftArm: { rotation: { "0.0": [0, 0, 0], "0.6": [-160, 0, 0], "1.2": [-160, 0, 0] } } } },
+            },
+        }),
+    };
+}
+
+function cat() {
+    return {
+        "manifest.json": encode({
+            format: 1, kind: "pet", id: "cat", requires: ["controllers", "pets", "roles"],
+            geometry: "wings", textures: ["wings"], archetype: "walking", animations: ["wings"],
+            interactions: { greet: ["a", "b"], play: ["a", "b"] },
+            roles: [
+                { interaction: "greet", id: "a", animation: "idle", offset: [0, 0, -0.6] },
+                { interaction: "greet", id: "b", animation: "droop", offset: [0, 0, 0.6], yaw: 180 },
+            ],
+        }),
+        "models/wings.geo.json": wings["models/wings.geo.json"],
+        "textures/wings.png": wings["textures/wings.png"],
+        "animations/wings.animation.json": wings["animations/wings.animation.json"],
+    };
+}
+
+const player = await PreviewPlayer.create(canvas, { onError: (error) => show(error) });
+player.attachOrbit();
+const skinImage = await createImageBitmap(await (await fetch(SKIN)).blob());
+player.setPlayers([{ skin: skinImage, slim: false }]);
+player.start();
+
+let uploaded = null;
+let worn = null;
+
+function show(error) {
+    console.error(error);
+    const issues = error?.issues?.length ? `\n${error.issues.map((issue) => `${issue.code}: ${issue.at ?? ""}`).join("\n")}` : "";
+    status.textContent = `${error?.message ?? error}${issues}`;
+}
+
+function reset() {
+    player.clearWorn();
+    player.clearEmote();
+    player.clearPets();
+    uploaded?.free();
+    uploaded = null;
+    worn = null;
+    player.setPlayers([{ skin: skinImage, slim: $("slim").checked }]);
+}
+
+function wearIt(source) {
+    worn = player.wear(source);
+    $("colorway").replaceChildren(new Option("Default", String(NO_COLORWAY)), ...worn.colorways.map((name, i) => new Option(name, String(i))));
+    $("effect").replaceChildren(...worn.namedEffects.map((name) => new Option(name, name)));
+}
+
+function routed(source) {
+    const kind = (source.meta ? source.meta() : null)?.kind;
+    if (kind === "emote") player.playEmote(source, { loop: $("loop").checked });
+    else if (kind === "pet") player.showPet(source, { partner: source, interaction: $("interaction").value || null });
+    else wearIt(source);
+}
+
+const samples = {
+    item: () => wearIt(wings),
+    effect: () => wearIt(spark),
+    emote: () => player.playEmote(wave(), { loop: $("loop").checked }),
+    duo: () => player.playEmote(highFive(), { loop: $("loop").checked }),
+    pet: () => player.showPet(cat()),
+    pets: () => player.showPet(cat(), { partner: cat(), interaction: $("interaction").value || "greet" }),
+    clear: () => {},
+};
+
+$("samples").addEventListener("click", (event) => {
+    const name = event.target?.dataset?.sample;
+    if (!name) return;
+    try {
+        reset();
+        samples[name]();
+        player.focus();
+        status.textContent = "";
+    } catch (error) {
+        show(error);
+    }
+});
+
+$("bundle").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+        reset();
+        uploaded = player.parse(new Uint8Array(await file.arrayBuffer()));
+        routed(uploaded);
+        player.focus();
+        status.textContent = `${uploaded.meta().kind} "${uploaded.meta().id}"`;
+    } catch (error) {
+        show(error);
+    }
+});
+
+$("skin").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (file) player.setSkin(await createImageBitmap(file), { index: 0 });
+});
+$("slim").addEventListener("change", (event) => player.setSkin(player.players[0]?.skin ?? skinImage, { index: 0, slim: event.target.checked }));
+
+function paint() {
+    if (!worn) return;
+    worn.setColorway(Number($("colorway").value));
+    const rgb = parseInt($("custom").value.slice(1), 16);
+    worn.setCustom($("use-custom").checked ? { 0: rgb } : null);
+}
+$("colorway").addEventListener("change", paint);
+$("custom").addEventListener("input", paint);
+$("use-custom").addEventListener("change", paint);
+$("fire").addEventListener("click", () => {
+    const name = $("effect").value;
+    if (name && !player.fire(name)) status.textContent = `Nothing plays "${name}".`;
+});
+
+for (const box of document.querySelectorAll("[data-signal]")) {
+    box.addEventListener("change", () => player.setSignal(box.dataset.signal, box.checked ? 1 : 0));
+}
+$("hurt").addEventListener("click", () => {
+    player.setSignal("is_hurt", 1);
+    setTimeout(() => player.setSignal("is_hurt", 0), 300);
+});
+$("jump").addEventListener("click", () => player.pulse(EVENT_JUMP));
+$("light").addEventListener("input", (event) => player.setLightLevel(Number(event.target.value)));
+$("mute").addEventListener("change", (event) => (player.muted = event.target.checked));
+
+const session = () => player.emote ?? player.pets;
+$("play").addEventListener("click", () => session()?.play());
+$("pause").addEventListener("click", () => session()?.pause());
+$("stop").addEventListener("click", () => player.emote?.stop());
+$("time").addEventListener("input", (event) => {
+    const current = session();
+    if (!current || !Number.isFinite(current.length)) return;
+    current.seek(Number(event.target.value) * current.length);
+});
+$("loop").addEventListener("change", (event) => {
+    if (session()) session().loop = event.target.checked;
+});
+for (const id of ["greet", "follow", "nap", "play", "chase"]) $("interaction").append(new Option(id, id));
+$("interaction").addEventListener("change", (event) => player.pets?.setInteraction(event.target.value || null));
+
+function update() {
+    const current = session();
+    if (current && Number.isFinite(current.length) && document.activeElement !== $("time")) {
+        $("time").value = String(current.time / current.length);
+    }
+    const skipped = player.vanillaSoundsSkipped;
+    if (skipped.length && !status.textContent) status.textContent = `Minecraft sounds don't play here: ${skipped.join(", ")}.`;
+    requestAnimationFrame(update);
+}
+requestAnimationFrame(update);
+</script>
+</body>
+</html>
