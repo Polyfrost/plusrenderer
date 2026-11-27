@@ -1,5 +1,6 @@
 //! Bone hierarchy to world transforms, the only place animation touches rendering.
 
+use crate::animation::Animation;
 use crate::ir::Model;
 use crate::math::{bedrock_rotation, Affine};
 
@@ -36,14 +37,114 @@ impl Pose {
     }
 }
 
+pub const POSE_CHANNELS: usize = 3;
+
+pub fn held_channels(
+    animations: &[Animation],
+    groups: &[(&[Vec<Option<usize>>], usize)],
+) -> Vec<u32> {
+    let mut held: Vec<u32> = groups
+        .iter()
+        .flat_map(|&(binds, first)| {
+            animations
+                .iter()
+                .zip(binds)
+                .flat_map(move |(animation, bind)| {
+                    animation
+                        .keyed_channels(bind)
+                        .map(move |channel| first * POSE_CHANNELS + channel)
+                })
+        })
+        .filter_map(|channel| u32::try_from(channel).ok())
+        .collect();
+    held.sort_unstable();
+    held.dedup();
+    held
+}
+
+fn channel_of(bone: &BonePose, kind: usize) -> [f32; 3] {
+    match kind {
+        0 => bone.rotation,
+        1 => bone.position,
+        _ => bone.scale,
+    }
+}
+
+fn channel_mut(bone: &mut BonePose, kind: usize) -> &mut [f32; 3] {
+    match kind {
+        0 => &mut bone.rotation,
+        1 => &mut bone.position,
+        _ => &mut bone.scale,
+    }
+}
+
+pub fn hold_channels(held: &[u32], bones: &[BonePose], props: &[BonePose], out: &mut [[f32; 3]]) {
+    for (&code, slot) in held.iter().zip(out) {
+        let (bone, kind) = (code as usize / POSE_CHANNELS, code as usize % POSE_CHANNELS);
+        let pose = match bone.checked_sub(bones.len()) {
+            None => bones.get(bone),
+            Some(prop) => props.get(prop),
+        };
+        if let Some(pose) = pose {
+            *slot = channel_of(pose, kind);
+        }
+    }
+}
+
+pub fn restore_channels(
+    held: &[u32],
+    stored: &[[f32; 3]],
+    bones: &mut [BonePose],
+    props: &mut [BonePose],
+) {
+    bones.fill(BonePose::default());
+    props.fill(BonePose::default());
+    for (&code, value) in held.iter().zip(stored) {
+        let (bone, kind) = (code as usize / POSE_CHANNELS, code as usize % POSE_CHANNELS);
+        let pose = match bone.checked_sub(bones.len()) {
+            None => bones.get_mut(bone),
+            Some(prop) => props.get_mut(prop),
+        };
+        if let Some(pose) = pose {
+            *channel_mut(pose, kind) = *value;
+        }
+    }
+}
+
 /// One per bone. `external` resolves parents outside this model, e.g. an attachable's `head`.
-pub fn world_transforms<F>(
+pub fn world_transforms<F>(model: &Model, pose: Option<&Pose>, external: F, out: &mut Vec<Affine>)
+where
+    F: FnMut(&str) -> Option<Affine>,
+{
+    world_transforms_carried(model, pose, external, &[], out);
+}
+
+pub fn world_transforms_carried<F>(
     model: &Model,
     pose: Option<&Pose>,
     mut external: F,
+    carried: &[(usize, usize)],
     out: &mut Vec<Affine>,
 ) where
     F: FnMut(&str) -> Option<Affine>,
+{
+    world_transforms_resolved(
+        model,
+        pose,
+        |bone| external(model.bones[bone].parent_name.as_deref()?),
+        carried,
+        out,
+    );
+}
+
+pub fn world_transforms_resolved<F>(
+    model: &Model,
+    pose: Option<&Pose>,
+    mut external: F,
+    carried: &[(usize, usize)],
+    out: &mut Vec<Affine>,
+) where
+    F: FnMut(usize) -> Option<Affine>,
 {
     out.clear();
     out.reserve(model.bones.len());
@@ -63,18 +164,53 @@ pub fn world_transforms<F>(
             &rotation.mul(&Affine::scale(p.scale)),
         ));
 
-        let parent = match bone.parent {
+        let carrier = carried
+            .iter()
+            .find(|&&(child, carrier)| child == i && carrier < i)
+            .map(|&(_, carrier)| carrier);
+        let parent = match carrier.or(bone.parent) {
             // Bones are topologically sorted, so the parent is already done.
             Some(idx) => out[idx],
             None => bone
                 .parent_name
-                .as_deref()
-                .and_then(&mut external)
+                .as_ref()
+                .and_then(|_| external(i))
                 .unwrap_or(Affine::IDENTITY),
         };
 
         out.push(parent.mul(&local));
     }
+}
+
+pub fn inverse(a: &Affine) -> Option<Affine> {
+    let m = &a.0;
+    let c00 = m[5] * m[10] - m[6] * m[9];
+    let c01 = m[6] * m[8] - m[4] * m[10];
+    let c02 = m[4] * m[9] - m[5] * m[8];
+    let det = m[0] * c00 + m[1] * c01 + m[2] * c02;
+    if !det.is_finite() || det.abs() < 1e-12 {
+        return None;
+    }
+    let d = 1.0 / det;
+    let linear = [
+        c00 * d,
+        (m[2] * m[9] - m[1] * m[10]) * d,
+        (m[1] * m[6] - m[2] * m[5]) * d,
+        c01 * d,
+        (m[0] * m[10] - m[2] * m[8]) * d,
+        (m[2] * m[4] - m[0] * m[6]) * d,
+        c02 * d,
+        (m[1] * m[8] - m[0] * m[9]) * d,
+        (m[0] * m[5] - m[1] * m[4]) * d,
+    ];
+    let t = [m[3], m[7], m[11]];
+    let mut out = [0.0f32; 12];
+    for r in 0..3 {
+        let row = &linear[r * 3..r * 3 + 3];
+        out[r * 4..r * 4 + 3].copy_from_slice(row);
+        out[r * 4 + 3] = -(row[0] * t[0] + row[1] * t[1] + row[2] * t[2]);
+    }
+    Some(Affine(out))
 }
 
 #[cfg(test)]

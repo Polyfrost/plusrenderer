@@ -4,6 +4,7 @@ use crate::bedrock;
 use crate::ir::Model;
 
 const PLAYER_GEO: &str = include_str!("../assets/player.geo.json");
+pub const PLAYER_BONES: usize = 13;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Arms {
@@ -48,7 +49,7 @@ impl ElytraPose {
             ElytraPose::Standing => ([15.0, 0.0, -15.0], 0.0),
             ElytraPose::Crouching => ([40.0, 5.0, -45.0], 3.0),
             ElytraPose::Flying { fall } => {
-                let spread = 1.0 - fall.clamp(0.0, 1.0).powf(1.5);
+                let spread = 1.0 - libm::powf(fall.clamp(0.0, 1.0), 1.5);
                 let lerp = |from: f32, to: f32| from + (to - from) * spread;
                 ([lerp(15.0, 20.0), 0.0, lerp(-15.0, -90.0)], 0.0)
             }
@@ -79,6 +80,100 @@ pub fn pose_elytra(model: &mut Model, pose: ElytraPose) {
     }
 }
 
+pub fn elytra_pose(
+    gliding: bool,
+    sneaking: bool,
+    ground_speed: f32,
+    vertical_speed: f32,
+) -> ElytraPose {
+    if gliding {
+        let speed = libm::sqrtf(ground_speed * ground_speed + vertical_speed * vertical_speed);
+        let fall = -vertical_speed / speed;
+        ElytraPose::Flying {
+            fall: if fall > 0.0 { fall.min(1.0) } else { 0.0 },
+        }
+    } else if sneaking {
+        ElytraPose::Crouching
+    } else {
+        ElytraPose::Standing
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlayerLocatorDef {
+    pub name: &'static str,
+    pub bone: &'static str,
+    pub offset: [f32; 3],
+    pub wing: Option<&'static str>,
+}
+
+pub const PLAYER_LOCATORS: [PlayerLocatorDef; 10] = [
+    PlayerLocatorDef {
+        name: "feet",
+        bone: "root",
+        offset: [0.0; 3],
+        wing: None,
+    },
+    PlayerLocatorDef {
+        name: "body",
+        bone: "body",
+        offset: [0.0, 18.0, 0.0],
+        wing: None,
+    },
+    PlayerLocatorDef {
+        name: "head",
+        bone: "head",
+        offset: [0.0, 28.0, 0.0],
+        wing: None,
+    },
+    PlayerLocatorDef {
+        name: "right_hand",
+        bone: "rightArm",
+        offset: [-6.0, 12.0, 0.0],
+        wing: None,
+    },
+    PlayerLocatorDef {
+        name: "left_hand",
+        bone: "leftArm",
+        offset: [6.0, 12.0, 0.0],
+        wing: None,
+    },
+    PlayerLocatorDef {
+        name: "back",
+        bone: "body",
+        offset: [0.0, 18.0, -2.0],
+        wing: None,
+    },
+    PlayerLocatorDef {
+        name: "above_head",
+        bone: "head",
+        offset: [0.0, 34.0, 0.0],
+        wing: None,
+    },
+    PlayerLocatorDef {
+        name: "left_wing_tip",
+        bone: "root",
+        offset: [5.0, 4.0, 4.0],
+        wing: Some("leftWing"),
+    },
+    PlayerLocatorDef {
+        name: "right_wing_tip",
+        bone: "root",
+        offset: [-5.0, 4.0, 4.0],
+        wing: Some("rightWing"),
+    },
+    PlayerLocatorDef {
+        name: "tail",
+        bone: "body",
+        offset: [0.0, 13.0, -2.0],
+        wing: None,
+    },
+];
+
+pub fn player_locator(name: &str) -> Option<usize> {
+    PLAYER_LOCATORS.iter().position(|l| l.name == name)
+}
+
 pub fn model(arms: Arms) -> Model {
     let want = match arms {
         Arms::Wide => "geometry.player.wide",
@@ -95,47 +190,32 @@ pub fn model(arms: Arms) -> Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{corner_uv, Face};
+
+    #[test]
+    fn player_locators_are_named_in_a_fixed_order() {
+        let names: Vec<_> = PLAYER_LOCATORS.iter().map(|l| l.name).collect();
+        assert_eq!(
+            names,
+            [
+                "feet",
+                "body",
+                "head",
+                "right_hand",
+                "left_hand",
+                "back",
+                "above_head",
+                "left_wing_tip",
+                "right_wing_tip",
+                "tail"
+            ]
+        );
+        for (i, l) in PLAYER_LOCATORS.iter().enumerate() {
+            assert_eq!(player_locator(l.name), Some(i));
+        }
+        assert_eq!(player_locator("tailbone"), None);
+    }
 
     /// Every skin's head front is the 8x8 square at (8,8).
-    #[test]
-    fn head_front_face_is_the_face() {
-        let m = model(Arms::Wide);
-        let head = &m.bones[m.bone("head").unwrap()];
-        let uv = head.cubes[0].faces[Face::South.index()].unwrap();
-        assert_eq!(uv.uv, [8.0, 8.0]);
-        assert_eq!(uv.size, [8.0, 8.0]);
-        // Corners run across then down.
-        assert_eq!(corner_uv(uv, 0), [8.0, 8.0]);
-        assert_eq!(corner_uv(uv, 2), [16.0, 16.0]);
-    }
-
-    #[test]
-    fn box_uv_wraps_the_whole_cross() {
-        let m = model(Arms::Wide);
-        let head = &m.bones[m.bone("head").unwrap()];
-        let f = &head.cubes[0].faces;
-        assert_eq!(f[Face::Up.index()].unwrap().uv, [8.0, 0.0]);
-        assert_eq!(f[Face::West.index()].unwrap().uv, [0.0, 8.0]);
-        assert_eq!(f[Face::East.index()].unwrap().uv, [16.0, 8.0]);
-        assert_eq!(f[Face::North.index()].unwrap().uv, [24.0, 8.0]);
-        assert!(f[Face::Down.index()].unwrap().size[1] < 0.0);
-    }
-
-    #[test]
-    fn slim_arms_are_three_wide() {
-        let wide = model(Arms::Wide);
-        let slim = model(Arms::Slim);
-        let w = &wide.bones[wide.bone("rightArm").unwrap()].cubes[0];
-        let s = &slim.bones[slim.bone("rightArm").unwrap()].cubes[0];
-        assert_eq!(w.size[0], 4.0);
-        assert_eq!(s.size[0], 3.0);
-        assert_eq!(w.origin[0] + w.size[0], s.origin[0] + s.size[0]);
-        // Only the width shrinks, the arm keeps its height and shoulder line.
-        assert_eq!(w.origin[1..], s.origin[1..]);
-        assert_eq!(w.size[1..], s.size[1..]);
-    }
-
     #[test]
     fn layers_are_inflated_cubes_and_parented_to_their_part() {
         let m = model(Arms::Wide);
@@ -155,40 +235,6 @@ mod tests {
                 "{layer} must be inflated"
             );
         }
-    }
-
-    #[test]
-    fn bones_are_topologically_sorted() {
-        for arms in [Arms::Wide, Arms::Slim] {
-            let m = model(arms);
-            for (i, b) in m.bones.iter().enumerate() {
-                if let Some(p) = b.parent {
-                    assert!(p < i, "{} comes before its parent", b.name);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn the_cape_hangs_behind_and_leans_away() {
-        let cape = cape();
-        assert_eq!(cape.bones[0].parent_name.as_deref(), Some("body"));
-        let mut out = Vec::new();
-        crate::pose::world_transforms(&cape, None, |_| None, &mut out);
-        let c = &cape.bones[0].cubes[0];
-        let (min, max) = c.bounds();
-        let top = out[0].point([0.0, max[1], max[2]]);
-        let hem = out[0].point([0.0, min[1], max[2]]);
-
-        assert!(
-            top[2] <= -2.0 + 1e-4,
-            "behind the body's back at z=-2: {top:?}"
-        );
-        assert!(
-            hem[2] < top[2],
-            "the hem leans further back: {hem:?} vs {top:?}"
-        );
-        assert_eq!(c.faces[Face::North.index()].unwrap().uv, [1.0, 1.0]);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! Backend-agnostic model IR. Box UV and `mirror` are resolved at parse time. 64x32 skins unsupported.
 //! Right-handed, Y up, feet at origin, front +Z, right on -X. Bedrock files negate Z and `bedrock::to_ir` converts.
 
+use crate::math::{bedrock_rotation, Affine};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Face {
     North = 0,
@@ -141,6 +143,45 @@ pub struct Bone {
     pub cubes: Vec<Cube>,
     /// Minimum light level 0..=15. Only cosmetics glow (`cosmetic::prepare`).
     pub glow: Option<u8>,
+    pub locators: Vec<Locator>,
+    pub spring: Option<SpringParams>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Locator {
+    pub name: String,
+    pub offset: [f32; 3],
+    pub rotation: [f32; 3],
+}
+
+impl Locator {
+    pub fn world(&self, bone: &Affine) -> Affine {
+        bone.mul(&Affine::translation(self.offset))
+            .mul(&bedrock_rotation(self.rotation))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpringParams {
+    pub stiffness: f32,
+    pub damping: f32,
+    pub gravity: f32,
+    pub drag: f32,
+    pub limit_deg: f32,
+    pub collide: bool,
+}
+
+impl Default for SpringParams {
+    fn default() -> Self {
+        SpringParams {
+            stiffness: 0.4,
+            damping: 0.2,
+            gravity: 0.6,
+            drag: 0.1,
+            limit_deg: 50.0,
+            collide: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -154,5 +195,16 @@ pub struct Model {
 impl Model {
     pub fn bone(&self, name: &str) -> Option<usize> {
         self.bones.iter().position(|b| b.name == name)
+    }
+
+    pub fn locators(&self) -> impl Iterator<Item = (usize, &Locator)> {
+        self.bones
+            .iter()
+            .enumerate()
+            .flat_map(|(i, b)| b.locators.iter().map(move |l| (i, l)))
+    }
+
+    pub fn locator(&self, name: &str) -> Option<(usize, &Locator)> {
+        self.locators().find(|(_, l)| l.name == name)
     }
 }

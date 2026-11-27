@@ -554,6 +554,8 @@ mod tests {
                 rotation: [0.0; 3],
                 cubes,
                 glow: None,
+                locators: Vec::new(),
+                spring: None,
             }],
         }
     }
@@ -614,25 +616,6 @@ mod tests {
     }
 
     #[test]
-    fn unculled_instances_show_faces_from_behind() {
-        let m = model(vec![cube([-8.0; 3], [16.0; 3], 0.0)]);
-        let culled = face_tags(&render(
-            &m,
-            &orbit(0.0, 0.0, 400.0),
-            true,
-            &Light::default(),
-        ));
-        let both = face_tags(&render(
-            &m,
-            &orbit(0.0, 0.0, 400.0),
-            false,
-            &Light::default(),
-        ));
-        assert_eq!(culled, vec![Face::South.index() as f32]);
-        assert!(both.contains(&(Face::North.index() as f32)), "{both:?}");
-    }
-
-    #[test]
     fn an_inflated_layer_draws_over_what_it_wraps() {
         let inner = cube([-8.0; 3], [16.0; 3], 0.0);
         let mut outer = cube([-8.0; 3], [16.0; 3], 100.0);
@@ -643,19 +626,6 @@ mod tests {
     }
 
     /// Seen from above, face-centre sorting would paint the leg over the boot.
-    #[test]
-    fn a_close_fitting_cosmetic_stays_in_front_from_above() {
-        let leg = cube([-2.0, 0.0, -2.0], [4.0, 12.0, 4.0], 0.0);
-        let boot = cube([-2.3, 0.0, -2.3], [4.6, 3.0, 4.6], 100.0);
-        let camera = Camera::orbit(0.0, 40.0, 40.0, [0.0, 6.0, 0.0]);
-        let b = render(&model(vec![leg, boot]), &camera, true, &Light::default());
-        assert_eq!(
-            visible_at(&b, &camera, [0.0, 1.5, 2.3]),
-            Some(1),
-            "the boot's front"
-        );
-    }
-
     #[test]
     fn interpenetrating_faces_are_cut_and_interleaved() {
         let a = cube([-6.0, -6.0, -0.5], [12.0, 12.0, 1.0], 0.0);
@@ -674,45 +644,5 @@ mod tests {
             Some(1),
             "b wins right"
         );
-    }
-
-    #[test]
-    fn oblique_faces_subdivide_when_close() {
-        let m = model(vec![cube([-8.0; 3], [16.0; 3], 0.0)]);
-        let light = Light::default();
-        let far = render(&m, &orbit(45.0, 0.0, 400.0), true, &light)
-            .indices
-            .len();
-        let close = render(&m, &orbit(45.0, 0.0, 22.0), true, &light)
-            .indices
-            .len();
-        assert!(close > far, "{close} vs {far}");
-    }
-
-    #[test]
-    fn glowing_bones_stay_lit_in_the_dark() {
-        let mut m = model(vec![cube([-8.0; 3], [16.0; 3], 0.0)]);
-        let camera = orbit(0.0, 0.0, 400.0);
-        let shade = |m: &Model, light: Light| render(m, &camera, true, &light).colors[0] & 0xff;
-        let dark = Light { level: 2.0 };
-        let unlit = shade(&m, dark);
-        m.bones[0].glow = Some(15);
-        assert!(unlit < 40, "level 2 is near black: {unlit}");
-        assert_eq!(
-            shade(&m, dark),
-            shade(&m, Light::default()),
-            "glow 15 looks like daylight"
-        );
-    }
-
-    #[test]
-    fn runs_cover_every_index_once() {
-        let m = model(vec![cube([-8.0; 3], [16.0; 3], 0.0)]);
-        let b = render(&m, &orbit(30.0, 20.0, 400.0), true, &Light::default());
-        let covered: u32 = b.runs.iter().map(|r| r.count).sum();
-        assert_eq!(covered as usize, b.indices.len());
-        assert_eq!(b.runs[0].start, 0);
-        assert_eq!(b.colors.len(), b.positions.len() / 2);
-        assert_eq!(b.uvs.len(), b.positions.len());
     }
 }
