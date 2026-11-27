@@ -1,0 +1,49 @@
+{
+  "resolution": "smooth",
+  "emissive": true,
+  "nodes": [
+    {
+      "id": "uv",
+      "type": "TagUV"
+    },
+    {
+      "id": "stretch",
+      "type": "mul",
+      "in": {
+        "a": "uv",
+        "b": [
+          0.5,
+          0.125
+        ]
+      }
+    },
+    {
+      "id": "tex",
+      "type": "VanillaTexture",
+      "in": {
+        "uv": "stretch"
+      },
+      "set": {
+        "texture": "glint"
+      }
+    },
+    {
+      "id": "soft",
+      "type": "Alpha",
+      "in": {
+        "color": "tex",
+        "alpha": 0.35
+      }
+    },
+    {
+      "id": "out",
+      "type": "Output",
+      "in": {
+        "color": "soft"
+      },
+      "set": {
+        "blend": "additive"
+      }
+    }
+  ]
+}

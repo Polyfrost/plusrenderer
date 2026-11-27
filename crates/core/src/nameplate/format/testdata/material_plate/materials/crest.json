@@ -1,0 +1,56 @@
+{
+  "resolution": "pixel",
+  "nodes": [
+    {
+      "id": "cell",
+      "type": "PixelCell"
+    },
+    {
+      "id": "uv",
+      "type": "mul",
+      "in": {
+        "a": "cell",
+        "b": [
+          0.125,
+          0.125
+        ]
+      }
+    },
+    {
+      "id": "tex",
+      "type": "BundleTexture",
+      "in": {
+        "uv": "uv"
+      },
+      "set": {
+        "texture": "crest"
+      }
+    },
+    {
+      "id": "alpha",
+      "type": "Component",
+      "in": {
+        "v": "tex"
+      },
+      "set": {
+        "component": "w"
+      }
+    },
+    {
+      "id": "cover",
+      "type": "step",
+      "in": {
+        "edge": 0.5,
+        "x": "alpha"
+      }
+    },
+    {
+      "id": "out",
+      "type": "Output",
+      "in": {
+        "color": "tex",
+        "coverage": "cover"
+      }
+    }
+  ]
+}

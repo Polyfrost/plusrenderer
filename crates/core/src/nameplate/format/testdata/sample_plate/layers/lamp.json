@@ -1,0 +1,6 @@
+{
+  "kind": "sprite",
+  "sprite": "glow",
+  "of": "body",
+  "anchor": "top_left"
+}

@@ -1,0 +1,24 @@
+{
+  "kind": "sprite",
+  "sprite": "blades",
+  "of": "body",
+  "anchor": "top_right",
+  "timeline": [
+    {
+      "frame": 0,
+      "hold": 4
+    },
+    {
+      "frame": 1,
+      "hold": 2
+    },
+    {
+      "frame": 2,
+      "hold": 6
+    },
+    {
+      "frame": 1,
+      "hold": 4
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "kind": "nameplate",
+  "id": "dome_plate",
+  "requires": [
+    "nameplate"
+  ],
+  "fps": 10,
+  "loop": 20,
+  "ownsBackground": true,
+  "text": {
+    "mode": "vanilla",
+    "color": "text",
+    "shadow": "auto",
+    "outline": "none",
+    "formatting": "adjust",
+    "candidates": [
+      "text",
+      "#1A1A1A"
+    ]
+  },
+  "layers": [
+    {
+      "id": "outer_dome"
+    },
+    {
+      "id": "outer_plate"
+    },
+    {
+      "id": "inner_dome"
+    }
+  ],
+  "variants": {
+    "dome": {
+      "hide": [
+        "outer_plate"
+      ]
+    },
+    "plate": {
+      "hide": [
+        "outer_dome"
+      ]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "kind": "body",
+  "padding": [
+    3,
+    3,
+    3,
+    2
+  ],
+  "minWidth": 32,
+  "corners": [
+    16,
+    16,
+    0,
+    0
+  ],
+  "fill": {
+    "blend": "glow"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "slots": [
+    {
+      "id": "shell",
+      "name": "Shell",
+      "ramp": [
+        "#1E2340"
+      ]
+    },
+    {
+      "id": "rim",
+      "name": "Rim",
+      "ramp": [
+        "#E0B04A"
+      ]
+    },
+    {
+      "id": "glow",
+      "name": "Inner dome",
+      "ramp": [
+        "#6A7FD0",
+        "#34407A"
+      ]
+    },
+    {
+      "id": "text",
+      "name": "Text",
+      "ramp": [
+        "#FFFFFF"
+      ]
+    }
+  ]
+}

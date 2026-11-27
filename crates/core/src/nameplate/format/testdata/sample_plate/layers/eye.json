@@ -1,0 +1,12 @@
+{
+  "kind": "sprite",
+  "sprite": "lid",
+  "of": "body",
+  "anchor": "left",
+  "timeline": [
+    {
+      "frame": 0,
+      "hold": 16
+    }
+  ]
+}

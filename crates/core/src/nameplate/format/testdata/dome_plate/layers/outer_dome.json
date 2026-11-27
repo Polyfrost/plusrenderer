@@ -1,0 +1,24 @@
+{
+  "kind": "body",
+  "padding": [
+    6,
+    6,
+    6,
+    2
+  ],
+  "minWidth": 40,
+  "corners": [
+    16,
+    16,
+    0,
+    0
+  ],
+  "fill": {
+    "color": "shell"
+  },
+  "rings": [
+    {
+      "color": "rim"
+    }
+  ]
+}

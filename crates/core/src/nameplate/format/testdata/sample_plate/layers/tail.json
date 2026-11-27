@@ -1,0 +1,6 @@
+{
+  "kind": "sprite",
+  "sprite": "wisp",
+  "of": "body",
+  "anchor": "bottom_right"
+}

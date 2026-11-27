@@ -1,0 +1,34 @@
+{
+  "kind": "emitter",
+  "sprites": [
+    "ember"
+  ],
+  "of": "body",
+  "spawn": {
+    "shape": "line",
+    "edge": "top",
+    "offset": [
+      0,
+      0
+    ]
+  },
+  "lifetime": [
+    6,
+    10
+  ],
+  "velocity": {
+    "x": [
+      -0.5,
+      0.5
+    ],
+    "y": [
+      -1.5,
+      -0.75
+    ]
+  },
+  "gravity": [
+    0,
+    0.1
+  ],
+  "frames": "life"
+}

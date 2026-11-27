@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "kind": "nameplate",
+  "id": "material_plate",
+  "requires": [
+    "nameplate",
+    "nameplate_materials"
+  ],
+  "fps": 6,
+  "loop": 12,
+  "text": {
+    "mode": "vanilla",
+    "color": "ink",
+    "shadow": "none",
+    "outline": "none",
+    "formatting": "adjust",
+    "candidates": [
+      "#FFFFFF",
+      "#101018"
+    ]
+  },
+  "layers": [
+    {
+      "id": "halo",
+      "depth": "behind"
+    },
+    {
+      "id": "plate",
+      "depth": "background"
+    },
+    {
+      "id": "crest",
+      "depth": "over_background"
+    }
+  ]
+}
