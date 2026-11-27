@@ -1,0 +1,69 @@
+{
+  "resolution": "pixel",
+  "nodes": [
+    {
+      "id": "cell",
+      "type": "PixelCell"
+    },
+    {
+      "id": "cx",
+      "type": "Component",
+      "in": {
+        "v": "cell"
+      },
+      "set": {
+        "component": "x"
+      }
+    },
+    {
+      "id": "cy",
+      "type": "Component",
+      "in": {
+        "v": "cell"
+      },
+      "set": {
+        "component": "y"
+      }
+    },
+    {
+      "id": "sum",
+      "type": "add",
+      "in": {
+        "a": "cx",
+        "b": "cy"
+      }
+    },
+    {
+      "id": "half",
+      "type": "div",
+      "in": {
+        "a": "sum",
+        "b": 3
+      }
+    },
+    {
+      "id": "band",
+      "type": "floor",
+      "in": {
+        "x": "half"
+      }
+    },
+    {
+      "id": "wave",
+      "type": "Cycle",
+      "in": {
+        "index": "band"
+      },
+      "set": {
+        "slot": "tide"
+      }
+    },
+    {
+      "id": "out",
+      "type": "Output",
+      "in": {
+        "color": "wave"
+      }
+    }
+  ]
+}

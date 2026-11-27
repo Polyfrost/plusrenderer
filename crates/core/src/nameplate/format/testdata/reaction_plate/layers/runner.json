@@ -1,0 +1,17 @@
+{
+  "kind": "sprite",
+  "sprite": "runner",
+  "of": "body",
+  "anchor": "top_left",
+  "path": {
+    "preset": "perimeter",
+    "speed": 2,
+    "end": "wrap",
+    "frames": {
+      "right": [
+        0,
+        1
+      ]
+    }
+  }
+}

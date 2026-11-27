@@ -1,0 +1,41 @@
+{
+  "slots": [
+    {
+      "id": "border",
+      "name": "Border",
+      "ramp": [
+        "#D94040"
+      ]
+    },
+    {
+      "id": "fill",
+      "name": "Fill",
+      "ramp": [
+        "#262A3A",
+        "#1A1D29"
+      ]
+    },
+    {
+      "id": "gem",
+      "name": "Gem",
+      "ramp": [
+        "#2E5FA8",
+        "#7FB6FF"
+      ]
+    },
+    {
+      "id": "glow",
+      "name": "Glow",
+      "ramp": [
+        "#808080"
+      ]
+    },
+    {
+      "id": "text",
+      "name": "Text",
+      "ramp": [
+        "#F2F4FF"
+      ]
+    }
+  ]
+}

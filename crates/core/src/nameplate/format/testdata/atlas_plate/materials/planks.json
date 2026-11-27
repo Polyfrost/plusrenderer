@@ -1,0 +1,45 @@
+{
+  "resolution": "pixel",
+  "nodes": [
+    {
+      "id": "cell",
+      "type": "PixelCell"
+    },
+    {
+      "id": "uv",
+      "type": "mul",
+      "in": {
+        "a": "cell",
+        "b": [
+          0.0625,
+          0.0625
+        ]
+      }
+    },
+    {
+      "id": "tex",
+      "type": "AtlasSprite",
+      "in": {
+        "uv": "uv"
+      },
+      "set": {
+        "sprite": "minecraft:block/oak_planks"
+      }
+    },
+    {
+      "id": "dim",
+      "type": "Darken",
+      "in": {
+        "color": "tex",
+        "amount": 0.45
+      }
+    },
+    {
+      "id": "out",
+      "type": "Output",
+      "in": {
+        "color": "dim"
+      }
+    }
+  ]
+}

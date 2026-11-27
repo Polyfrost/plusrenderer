@@ -1,0 +1,28 @@
+{
+  "slots": [
+    {
+      "id": "tide",
+      "name": "Tide",
+      "ramp": [
+        "#14324A",
+        "#1D4E6B",
+        "#2A6F8C",
+        "#1D4E6B"
+      ]
+    },
+    {
+      "id": "glow",
+      "name": "Glow",
+      "ramp": [
+        "#FFB347"
+      ]
+    },
+    {
+      "id": "ink",
+      "name": "Ink",
+      "ramp": [
+        "#F4F1E8"
+      ]
+    }
+  ]
+}

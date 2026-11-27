@@ -1,0 +1,116 @@
+{
+  "format": 1,
+  "kind": "nameplate",
+  "id": "sample_plate",
+  "requires": [
+    "nameplate",
+    "nameplate_reactions",
+    "nameplate_one_shots",
+    "nameplate_schedules"
+  ],
+  "fps": 8,
+  "loop": 16,
+  "layers": [
+    {
+      "id": "body"
+    },
+    {
+      "id": "lamp",
+      "step": 2
+    },
+    {
+      "id": "fan"
+    },
+    {
+      "id": "tail",
+      "step": 2
+    },
+    {
+      "id": "eye"
+    }
+  ],
+  "animations": {
+    "sway": {
+      "schedule": {
+        "id": "tail_moves",
+        "window": 12,
+        "jitter": 3,
+        "chance": 0.75,
+        "weight": 3
+      },
+      "length": 6,
+      "tracks": {
+        "tail": {
+          "frame": [
+            [
+              0,
+              1
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              4,
+              3
+            ]
+          ]
+        }
+      }
+    },
+    "on_hurt": {
+      "trigger": {
+        "reaction": "is_hurt",
+        "on": "start"
+      },
+      "length": 6,
+      "tracks": {
+        "eye": {
+          "frame": [
+            [
+              0,
+              1
+            ],
+            [
+              3,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    "while_on_fire": {
+      "trigger": {
+        "reaction": "is_on_fire",
+        "on": "while"
+      },
+      "tracks": {
+        "lamp": {
+          "position": [
+            [
+              0,
+              [
+                0,
+                -1
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    "appear": {
+      "trigger": "appear",
+      "length": 4,
+      "tracks": {
+        "fan": {
+          "frame": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    }
+  }
+}

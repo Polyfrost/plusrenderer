@@ -1,0 +1,13 @@
+{
+  "kind": "body",
+  "padding": [
+    4,
+    2,
+    4,
+    2
+  ],
+  "radius": 2,
+  "fill": {
+    "color": "fill"
+  }
+}

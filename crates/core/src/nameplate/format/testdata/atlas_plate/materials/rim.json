@@ -1,0 +1,43 @@
+{
+  "resolution": "pixel",
+  "margins": [
+    2,
+    2,
+    2,
+    2
+  ],
+  "nodes": [
+    {
+      "id": "cell",
+      "type": "PixelCell"
+    },
+    {
+      "id": "uv",
+      "type": "mul",
+      "in": {
+        "a": "cell",
+        "b": [
+          0.0625,
+          0.0625
+        ]
+      }
+    },
+    {
+      "id": "tex",
+      "type": "AtlasSprite",
+      "in": {
+        "uv": "uv"
+      },
+      "set": {
+        "sprite": "minecraft:block/prismarine"
+      }
+    },
+    {
+      "id": "out",
+      "type": "Output",
+      "in": {
+        "color": "tex"
+      }
+    }
+  ]
+}
