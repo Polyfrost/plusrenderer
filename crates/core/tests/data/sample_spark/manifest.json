@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "kind": "effect",
+  "id": "sample_spark",
+  "requires": [
+    "effects",
+    "particles",
+    "sounds",
+    "trails",
+    "events"
+  ],
+  "particles": {
+    "spark": {}
+  },
+  "sounds": {
+    "pop": {
+      "volume": 0.5
+    },
+    "chime": {
+      "vanilla": "minecraft:block.note_block.chime",
+      "pitch": 1.5
+    }
+  },
+  "effects": {
+    "join": [
+      {
+        "particle": "spark",
+        "locator": "feet"
+      },
+      {
+        "sound": "pop"
+      }
+    ],
+    "sparkle": {
+      "vanilla": "flame",
+      "locator": "head",
+      "count": 2
+    }
+  },
+  "trails": [
+    {
+      "locator": "back",
+      "texture": "ribbon",
+      "width": 0.25
+    }
+  ]
+}

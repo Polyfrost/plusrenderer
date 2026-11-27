@@ -1,12 +1,18 @@
 //! Picks which files of an uploaded bundle mean what, by name, as PolyPlus `DiskAssetReader` does.
 
-#[derive(Debug, Default, PartialEq, Eq)]
+use crate::container::guarded_json;
+use crate::controller::{self, Controller};
+use crate::issues::Report;
+use crate::molang::{Interner, Rules};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Parts {
     pub geometry: Option<usize>,
     /// A cosmetic's animation, or an emote when there is no geometry.
     pub animation: Option<usize>,
     pub texture: Option<usize>,
     pub sheet: Option<usize>,
+    pub controllers: Vec<usize>,
 }
 
 /// First of each kind in path order, skipping macOS `._` forks. A `textures/` PNG wins.
@@ -25,13 +31,38 @@ pub fn parts(names: &[&str]) -> Parts {
             n.ends_with(".json")
                 && !n.ends_with(".geo.json")
                 && !n.ends_with(".emote.json")
-                && !n.ends_with(".animation_controllers.json")
+                && !is_controller_file(n)
                 && file_name(n) != "pet.json"
         }),
         texture: first(&|n| n.starts_with("textures/") && n.ends_with(".png"))
             .or_else(|| first(&|n| n.ends_with(".png"))),
         sheet: first(&|n| n.ends_with(".sheet")),
+        controllers: order
+            .iter()
+            .copied()
+            .filter(|&i| is_controller_file(&lower[i]))
+            .collect(),
     }
+}
+
+fn is_controller_file(lower: &str) -> bool {
+    lower.ends_with(".animation_controllers.json")
+        || (lower.ends_with(".json") && lower.rsplit('/').nth(1) == Some("animation_controllers"))
+}
+
+pub fn controllers(
+    files: &[(&str, &[u8])],
+    interner: &mut Interner,
+    rules: Rules,
+    report: &mut Report,
+) -> Vec<Controller> {
+    let mut out = Vec::new();
+    for (name, bytes) in files {
+        if let Some(root) = guarded_json(bytes, name, report) {
+            out.extend(controller::parse(name, &root, interner, rules, report));
+        }
+    }
+    out
 }
 
 fn file_name(path: &str) -> &str {

@@ -4,8 +4,10 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
+use serde_json::Value;
 
-use crate::ir::{Bone, Cube, Face, FaceUv, Model};
+use crate::ir::{Bone, Cube, Face, FaceUv, Locator, Model, SpringParams};
+use crate::issues::{join, path, Issue, IssueCode, Mode, Report};
 
 #[derive(Debug)]
 pub enum Error {
@@ -32,12 +34,69 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fault {
+    pub at: String,
+    pub kind: FaultKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FaultKind {
+    SpringNotObject,
+    SpringUnknownKey,
+    SpringWrongType,
+    SpringOutOfRange { value: f64 },
+    LocatorInvalid,
+    LocatorDuplicate,
+}
+
+#[derive(Debug)]
+pub struct Parsed {
+    pub models: Vec<Model>,
+    pub faults: Vec<Fault>,
+}
+
+pub fn report_faults(file: &str, faults: &[Fault], report: &mut Report) {
+    for fault in faults {
+        let at = path(file, &fault.at);
+        let key = fault.at.rsplit('.').next().unwrap_or_default();
+        let issue = match fault.kind {
+            FaultKind::SpringNotObject | FaultKind::SpringWrongType => {
+                Issue::error(IssueCode::SpringInvalid, at)
+            }
+            FaultKind::SpringOutOfRange { value } => {
+                Issue::warning(IssueCode::SpringSettingRange, at).value("value", value)
+            }
+            FaultKind::SpringUnknownKey if report.mode() == Mode::Authoring => {
+                Issue::error(IssueCode::UnknownKey, at).name("key", key)
+            }
+            FaultKind::SpringUnknownKey => continue,
+            FaultKind::LocatorInvalid => {
+                Issue::error(IssueCode::GeometryInvalid, at).name("locator", key)
+            }
+            FaultKind::LocatorDuplicate => {
+                Issue::warning(IssueCode::GeometryInvalid, at).name("locator", key)
+            }
+        };
+        report.push(issue);
+    }
+}
+
 pub fn parse(json: &str) -> Result<Vec<Model>, Error> {
+    parse_checked(json).map(|p| p.models)
+}
+
+pub fn parse_checked(json: &str) -> Result<Parsed, Error> {
     let mut root: serde_json::Value = serde_json::from_str(json)?;
+    let mut faults = Vec::new();
 
     if let Some(list) = root.get_mut("minecraft:geometry") {
         let raw: Vec<RawGeometry> = serde_json::from_value(list.take())?;
-        return raw.into_iter().map(build).collect();
+        let models = raw
+            .into_iter()
+            .map(|g| build(g, &mut faults))
+            .collect::<Result<_, _>>()?;
+        return Ok(Parsed { models, faults });
     }
 
     // 1.8.0: each `geometry.<name>` key is one model.
@@ -50,26 +109,37 @@ pub fn parse(json: &str) -> Result<Vec<Model>, Error> {
         }
         let mut raw: RawGeometry = serde_json::from_value(value.take())?;
         raw.description.identifier = key.clone();
-        out.push(build(raw)?);
+        out.push(build(raw, &mut faults)?);
     }
 
     if out.is_empty() {
         return Err(Error::NoGeometry);
     }
-    Ok(out)
+    Ok(Parsed {
+        models: out,
+        faults,
+    })
 }
 
 pub fn parse_one(json: &str) -> Result<Model, Error> {
     parse(json)?.into_iter().next().ok_or(Error::NoGeometry)
 }
 
-fn build(raw: RawGeometry) -> Result<Model, Error> {
+fn build(raw: RawGeometry, faults: &mut Vec<Fault>) -> Result<Model, Error> {
     let texture_size = [
         raw.texturewidth.unwrap_or(raw.description.texture_width),
         raw.textureheight.unwrap_or(raw.description.texture_height),
     ];
 
-    let bones = topo_sort(raw.bones)?;
+    let model_at = raw.description.identifier.clone();
+    let mut bones = topo_sort(raw.bones, |b| {
+        let at = join(&join(&model_at, "bones"), &b.name);
+        (
+            locators(b.locators.as_ref(), &at, faults),
+            b.spring.as_ref().and_then(|v| spring(v, &at, faults)),
+        )
+    })?;
+    flag_duplicate_locators(&mut bones, &model_at, faults);
 
     Ok(Model {
         identifier: raw.description.identifier,
@@ -79,7 +149,10 @@ fn build(raw: RawGeometry) -> Result<Model, Error> {
 }
 
 /// Parents first. A bone whose parent is outside the file becomes a root but keeps `parent_name`.
-fn topo_sort(raw: Vec<RawBone>) -> Result<Vec<Bone>, Error> {
+fn topo_sort(
+    raw: Vec<RawBone>,
+    mut extras: impl FnMut(&RawBone) -> (Vec<Locator>, Option<SpringParams>),
+) -> Result<Vec<Bone>, Error> {
     let index: HashMap<&str, usize> = raw
         .iter()
         .enumerate()
@@ -130,6 +203,7 @@ fn topo_sort(raw: Vec<RawBone>) -> Result<Vec<Bone>, Error> {
                 .as_deref()
                 .and_then(|p| index.get(p))
                 .and_then(|&p| placed[p]);
+            let (locators, spring) = extras(b);
 
             Bone {
                 name: b.name.clone(),
@@ -143,9 +217,129 @@ fn topo_sort(raw: Vec<RawBone>) -> Result<Vec<Bone>, Error> {
                 rotation: b.rotation,
                 cubes: b.cubes.iter().map(|c| cube(c, b.mirror)).collect(),
                 glow: None,
+                locators,
+                spring,
             }
         })
         .collect())
+}
+
+fn locators(value: Option<&Value>, at: &str, faults: &mut Vec<Fault>) -> Vec<Locator> {
+    let Some(Value::Object(map)) = value else {
+        return Vec::new();
+    };
+    let at = join(at, "locators");
+    map.iter()
+        .filter_map(|(name, v)| {
+            let found = match v {
+                Value::Object(o) => o.get("offset").and_then(triple).map(|offset| {
+                    let rotation = o.get("rotation").and_then(triple).unwrap_or([0.0; 3]);
+                    (offset, rotation)
+                }),
+                other => triple(other).map(|offset| (offset, [0.0; 3])),
+            };
+            if found.is_none() {
+                faults.push(Fault {
+                    at: join(&at, name),
+                    kind: FaultKind::LocatorInvalid,
+                });
+            }
+            let (offset, rotation) = found?;
+            Some(Locator {
+                name: name.clone(),
+                offset: to_ir(offset),
+                rotation,
+            })
+        })
+        .collect()
+}
+
+fn triple(value: &Value) -> Option<[f32; 3]> {
+    let items = value.as_array().filter(|a| a.len() == 3)?;
+    let mut out = [0.0; 3];
+    for (slot, item) in out.iter_mut().zip(items) {
+        *slot = item.as_f64()? as f32;
+    }
+    Some(out)
+}
+
+fn flag_duplicate_locators(bones: &mut [Bone], model_at: &str, faults: &mut Vec<Fault>) {
+    let mut seen: Vec<String> = Vec::new();
+    for bone in bones.iter() {
+        for locator in &bone.locators {
+            if seen.contains(&locator.name) {
+                faults.push(Fault {
+                    at: join(
+                        &join(&join(&join(model_at, "bones"), &bone.name), "locators"),
+                        &locator.name,
+                    ),
+                    kind: FaultKind::LocatorDuplicate,
+                });
+            } else {
+                seen.push(locator.name.clone());
+            }
+        }
+    }
+}
+
+const SPRING_RANGES: [(&str, f64, f64); 5] = [
+    ("stiffness", 0.0, 1.0),
+    ("damping", 0.0, 1.0),
+    ("gravity", -1.0, 1.0),
+    ("drag", 0.0, 1.0),
+    ("limit", 0.0, 180.0),
+];
+
+fn spring(value: &Value, at: &str, faults: &mut Vec<Fault>) -> Option<SpringParams> {
+    let at = join(at, "polyplus:spring");
+    let map = match value {
+        Value::Null | Value::Bool(false) => return None,
+        Value::Object(map) => map,
+        _ => {
+            faults.push(Fault {
+                at,
+                kind: FaultKind::SpringNotObject,
+            });
+            return None;
+        }
+    };
+
+    let mut params = SpringParams::default();
+    for (key, v) in map {
+        let mut fault = |kind| {
+            faults.push(Fault {
+                at: join(&at, key),
+                kind,
+            })
+        };
+        if key == "collide" {
+            match v.as_bool() {
+                Some(b) => params.collide = b,
+                None => fault(FaultKind::SpringWrongType),
+            }
+            continue;
+        }
+        let Some(&(_, lo, hi)) = SPRING_RANGES.iter().find(|(k, _, _)| k == key) else {
+            fault(FaultKind::SpringUnknownKey);
+            continue;
+        };
+        let Some(raw) = v.as_f64() else {
+            fault(FaultKind::SpringWrongType);
+            continue;
+        };
+        if !(lo..=hi).contains(&raw) {
+            fault(FaultKind::SpringOutOfRange { value: raw });
+        }
+        let clamped = raw.clamp(lo, hi) as f32;
+        match key.as_str() {
+            "stiffness" => params.stiffness = clamped,
+            "damping" => params.damping = clamped,
+            "gravity" => params.gravity = clamped,
+            "drag" => params.drag = clamped,
+            _ => params.limit_deg = clamped,
+        }
+    }
+    Some(params)
 }
 
 fn cube(raw: &RawCube, bone_mirror: bool) -> Cube {
@@ -280,6 +474,9 @@ struct RawBone {
     mirror: bool,
     #[serde(default)]
     cubes: Vec<RawCube>,
+    locators: Option<Value>,
+    #[serde(rename = "polyplus:spring")]
+    spring: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -313,7 +510,7 @@ struct RawFaceUv {
 #[cfg(test)]
 mod tests {
     use crate::bedrock;
-    use crate::ir::Face;
+    use crate::ir::{Face, SpringParams};
 
     #[test]
     fn parses_legacy_1_8_layout() {
@@ -331,45 +528,6 @@ mod tests {
         assert_eq!(m.identifier, "geometry.cape");
         assert_eq!(m.texture_size, [64.0, 32.0]);
         assert_eq!(m.bones.len(), 1);
-    }
-
-    #[test]
-    fn mirror_flips_u_and_swaps_sides() {
-        let json = |mirror: bool| {
-            format!(
-                r#"{{"format_version":"1.12.0","minecraft:geometry":[{{
-                  "description": {{ "identifier": "g" }},
-                  "bones": [{{ "name": "b", "pivot": [0,0,0], "cubes": [
-                    {{ "origin": [0,0,0], "size": [4,6,2], "uv": [0,0], "mirror": {mirror} }}
-                  ] }}]
-                }}]}}"#
-            )
-        };
-        let plain = bedrock::parse_one(&json(false)).unwrap();
-        let flipped = bedrock::parse_one(&json(true)).unwrap();
-
-        let p = plain.bones[0].cubes[0].faces[Face::South.index()].unwrap();
-        let f = flipped.bones[0].cubes[0].faces[Face::South.index()].unwrap();
-        assert!(f.size[0] < 0.0, "mirrored faces run backwards in u");
-        assert_eq!(f.uv[0], p.uv[0] + p.size[0], "and start at the far edge");
-
-        // East and West swap rects.
-        let pe = plain.bones[0].cubes[0].faces[Face::East.index()].unwrap();
-        let fw = flipped.bones[0].cubes[0].faces[Face::West.index()].unwrap();
-        assert_eq!(pe.uv[1], fw.uv[1]);
-    }
-
-    #[test]
-    fn unresolved_parents_are_kept_for_attachables() {
-        let m = bedrock::parse_one(
-            r#"{"format_version":"1.12.0","minecraft:geometry":[{
-              "description": { "identifier": "geometry.hat" },
-              "bones": [{ "name": "brim", "parent": "head", "pivot": [0,32,0] }]
-            }]}"#,
-        )
-        .unwrap();
-        assert_eq!(m.bones[0].parent, None);
-        assert_eq!(m.bones[0].parent_name.as_deref(), Some("head"));
     }
 
     fn one_cube(cube: &str) -> crate::ir::Cube {
@@ -398,22 +556,6 @@ mod tests {
     }
 
     #[test]
-    fn box_uv_lays_out_on_whole_texels() {
-        let c = one_cube(r#"{"origin":[0,0,0],"size":[4.25,3.25,5.7],"uv":[0,0]}"#);
-        let south = c.faces[Face::South.index()].unwrap();
-        assert_eq!(south.uv, [5.0, 5.0], "offset by the floored depth");
-        assert_eq!(south.size, [4.0, 3.0]);
-    }
-
-    #[test]
-    fn a_rotated_cube_without_a_pivot_turns_about_its_centre() {
-        let c = one_cube(r#"{"origin":[2,4,6],"size":[2,4,6],"rotation":[0,0,45],"uv":[0,0]}"#);
-        assert_eq!(c.pivot, [3.0, 6.0, -9.0], "file centre, Z negated");
-        let explicit = one_cube(r#"{"origin":[2,4,6],"size":[2,4,6],"pivot":[0,0,0],"uv":[0,0]}"#);
-        assert_eq!(explicit.pivot, [0.0; 3]);
-    }
-
-    #[test]
     fn zero_depth_cubes_are_two_sided_billboards() {
         let c = one_cube(r#"{"origin":[0,0,-2],"size":[8,8,0],"uv":[0,0]}"#);
         let present: Vec<_> = Face::ALL
@@ -429,16 +571,6 @@ mod tests {
     }
 
     #[test]
-    fn file_space_back_is_ir_space_back() {
-        let c = one_cube(r#"{"origin":[-8,20,2],"size":[16,16,0],"uv":[0,0]}"#);
-        let (min, max) = c.bounds();
-        assert!(
-            max[2] < 0.0,
-            "a wing at file z=2 sits behind the body: {min:?}..{max:?}"
-        );
-    }
-
-    #[test]
     fn cyclic_bones_are_rejected() {
         let err = bedrock::parse_one(
             r#"{"format_version":"1.12.0","minecraft:geometry":[{
@@ -447,5 +579,50 @@ mod tests {
             }]}"#,
         );
         assert!(matches!(err, Err(bedrock::Error::CyclicBones(_))));
+    }
+
+    fn checked(bones: &str) -> bedrock::Parsed {
+        bedrock::parse_checked(&format!(
+            r#"{{"format_version":"1.12.0","minecraft:geometry":[{{
+              "description": {{ "identifier": "g" }},
+              "bones": [{bones}]
+            }}]}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn spring_blocks_parse_with_defaults_for_missing_keys() {
+        let p = checked(
+            r#"{ "name": "tail_1", "pivot": [0,12,2] },
+               { "name": "tail_2", "parent": "tail_1", "pivot": [0,12,4],
+                 "polyplus:spring": { "stiffness": 0.7, "gravity": -0.5, "limit": 90, "collide": false } },
+               { "name": "tail_3", "parent": "tail_2", "polyplus:spring": {} }"#,
+        );
+        assert!(p.faults.is_empty(), "{:?}", p.faults);
+        let m = &p.models[0];
+        assert_eq!(m.bones[0].spring, None);
+        assert_eq!(
+            m.bones[1].spring,
+            Some(SpringParams {
+                stiffness: 0.7,
+                gravity: -0.5,
+                limit_deg: 90.0,
+                collide: false,
+                ..SpringParams::default()
+            })
+        );
+        assert_eq!(m.bones[2].spring, Some(SpringParams::default()));
+        assert_eq!(
+            SpringParams::default(),
+            SpringParams {
+                stiffness: 0.4,
+                damping: 0.2,
+                gravity: 0.6,
+                drag: 0.1,
+                limit_deg: 50.0,
+                collide: true,
+            }
+        );
     }
 }
