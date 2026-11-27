@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nameplate preview</title>
+<style>
+    :root {
+        color-scheme: light dark;
+        --bg: #f4f4f6;
+        --panel: #ffffff;
+        --text: #1d1d22;
+        --muted: #6a6a75;
+        --stage: #7aa7d8;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #16161a;
+            --panel: #202026;
+            --text: #ececf1;
+            --muted: #9a9aa6;
+            --stage: #2f4a68;
+        }
+    }
+    body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.4 system-ui, sans-serif;
+    }
+    main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 16px;
+    }
+    canvas {
+        display: block;
+        width: 100%;
+        height: 220px;
+        background: var(--stage);
+        border-radius: 8px;
+        image-rendering: pixelated;
+    }
+    form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 12px 0;
+        padding: 12px;
+        background: var(--panel);
+        border-radius: 8px;
+    }
+    label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 12px;
+    }
+    label.check {
+        flex-direction: row;
+        align-items: center;
+        align-self: end;
+    }
+    output {
+        display: block;
+        color: var(--muted);
+        white-space: pre-wrap;
+        font-size: 12px;
+    }
+</style>
+</head>
+<body>
+<main>
+    <canvas id="stage"></canvas>
+    <form id="controls">
+        <label>Name <input id="name" value="Steve" maxlength="16"></label>
+        <label>Variant <select id="variant"></select></label>
+        <label>Motion
+            <select id="motion">
+                <option value="0">Full</option>
+                <option value="1">Reduced</option>
+                <option value="2">Off</option>
+            </select>
+        </label>
+        <label>Effects
+            <select id="effects">
+                <option value="gpu">GPU</option>
+                <option value="cpu">CPU</option>
+                <option value="off">Off</option>
+            </select>
+        </label>
+        <label class="check"><input id="sneaking" type="checkbox"> Sneaking</label>
+    </form>
+    <output id="status"></output>
+</main>
+<script type="module">
+import {
+    NameplateEngine, startClock, tagRow, OUT, SIGNALS,
+    FLAG_EFFECTS_CPU, FLAG_EFFECTS_OFF, TEXT_MODE_VANILLA,
+} from "../nameplate.js";
+import { NameplateDrawer, letterAt } from "../nameplate-gl.js";
+
+const BUNDLE = "./material_plate/";
+const FILES = [
+    "manifest.json",
+    "palettes.json",
+    "layers/crest.json",
+    "layers/halo.json",
+    "layers/plate.json",
+    "materials/crest.json",
+    "materials/halo.json",
+    "materials/tide.json",
+    "textures/crest.png",
+];
+const ADVANCE = 6;
+const GLYPH = 5;
+const WEARER = 1n;
+
+const canvas = document.getElementById("stage");
+const status = document.getElementById("status");
+const field = (id) => document.getElementById(id);
+
+const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false });
+if (!gl) throw new Error("This page needs WebGL2.");
+
+const engine = await NameplateEngine.create(new URL("../plusrenderer.wasm", import.meta.url));
+const files = {};
+for (const name of FILES) files[name] = new Uint8Array(await (await fetch(BUNDLE + name)).arrayBuffer());
+const asset = await engine.load(files, { mode: "authoring" });
+const nameplates = engine.nameplates();
+const assetId = nameplates.addAsset(asset);
+const drawer = new NameplateDrawer(gl, nameplates);
+
+let gpu = true;
+try {
+    drawer.setAssetShaders(assetId, asset.shaders("es_300"));
+    const crest = await createImageBitmap(new Blob([files["textures/crest.png"]]));
+    drawer.setBundleTextures(assetId, [crest]);
+} catch (error) {
+    gpu = false;
+    field("effects").value = "cpu";
+    field("effects").querySelector('option[value="gpu"]').disabled = true;
+    console.warn("GPU materials are not available here, so they run on the CPU.", error);
+}
+
+for (const [index, key] of (asset.meta.variants ?? [{ key: "default" }]).map((v) => v.key).entries()) {
+    field("variant").append(new Option(key, String(index)));
+}
+const analysis = asset.usable ? asset.analyze() : null;
+status.textContent = [
+    `${asset.meta.id ?? "bundle"}: ${asset.kind}, ${asset.issues.length} issue(s)`,
+    analysis ? `${analysis.quads} quads, ${analysis.max_out_words} words per tag at most` : "",
+    ...asset.issues.map((i) => `${i.level} ${i.code} at ${i.path}`),
+].filter(Boolean).join("\n");
+
+const row = new Int32Array(OUT.TAG_INTS);
+const signals = new Float32Array(OUT.SIGNAL_FLOATS);
+const wearers = new BigUint64Array([WEARER]);
+let glyphs = new Float32Array(0);
+let name = "";
+
+function rebuild() {
+    name = field("name").value || " ";
+    const width = name.length * ADVANCE - 1;
+    glyphs = new Float32Array(name.length * OUT.GLYPH_FLOATS);
+    for (let i = 0; i < name.length; i++) {
+        glyphs[i * 2] = i * ADVANCE;
+        glyphs[i * 2 + 1] = GLYPH;
+    }
+    const effects = field("effects").value;
+    tagRow({
+        asset: assetId,
+        variant: Number(field("variant").value || 0),
+        flags: effects === "cpu" ? FLAG_EFFECTS_CPU : effects === "off" ? FLAG_EFFECTS_OFF : 0,
+        nameWidth: width,
+        lines: [width],
+        sneakAlpha: field("sneaking").checked ? 80 : 255,
+        glyphCount: name.length,
+    }, row);
+    signals[SIGNALS.indexOf("is_sneaking")] = field("sneaking").checked ? 1 : 0;
+    nameplates.setMotion(Number(field("motion").value));
+}
+field("controls").addEventListener("input", rebuild);
+rebuild();
+
+const letters = new Map();
+function letterImage(char, scale) {
+    const key = `${char}@${scale}`;
+    let image = letters.get(key);
+    if (!image) {
+        image = new OffscreenCanvas(ADVANCE * scale, 9 * scale);
+        const c = image.getContext("2d");
+        c.fillStyle = "#fff";
+        c.font = `bold ${8 * scale}px monospace`;
+        c.textBaseline = "top";
+        c.fillText(char, 0, 0, ADVANCE * scale);
+        letters.set(key, image);
+    }
+    return image;
+}
+
+function withAlpha(argb, alpha) {
+    const a = Math.round(((argb >>> 24) * alpha) / 255);
+    return ((a << 24) | (argb & 0xffffff)) >>> 0;
+}
+
+let pixelScale = 4;
+function drawText(ctx) {
+    const base = ctx.color || 0xffffffff;
+    const sneak = row[OUT.TAG_SNEAK_ALPHA];
+    const shadowed = ctx.shadowUse >= 2;
+    for (let i = 0; i < name.length; i++) {
+        let x = i * ADVANCE;
+        let y = 0;
+        let color = base;
+        if (ctx.mode !== TEXT_MODE_VANILLA && i < ctx.letterCount) {
+            const letter = letterAt(ctx, i);
+            x += letter.dx;
+            y += letter.dy;
+            color = withAlpha(letter.argb || base, letter.opacity);
+        }
+        const image = letterImage(name[i], pixelScale);
+        if (shadowed) drawer.drawImage(image, x + 1, y + 1, ADVANCE, 9, withAlpha(ctx.shadow || 0xff3f3f3f, sneak));
+        drawer.drawImage(image, x, y, ADVANCE, 9, withAlpha(color, sneak));
+    }
+}
+
+function drawBackground(ctx) {
+    const r = ctx.row;
+    drawer.fillRect(r[OUT.TAG_BG_X0], r[OUT.TAG_BG_Y0], r[OUT.TAG_BG_X1], r[OUT.TAG_BG_Y1], 0x40000000);
+}
+
+const clock = startClock();
+const hooks = { assetId, row, transform: { x: 0, y: 0, scale: 4 }, text: drawText, background: drawBackground };
+
+function tick() {
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.round(canvas.clientWidth * dpr);
+    const height = Math.round(canvas.clientHeight * dpr);
+    if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+    }
+    pixelScale = Math.max(1, Math.round(4 * dpr));
+    const tagWidth = row[OUT.TAG_NAME_WIDTH];
+    hooks.transform.scale = pixelScale;
+    hooks.transform.x = Math.round((width - tagWidth * pixelScale) / 2);
+    hooks.transform.y = Math.round((height - 8 * pixelScale) / 2);
+    hooks.viewport = [width, height];
+
+    nameplates.runFallbacks();
+    const out = nameplates.frame(clock(), wearers, row, signals, glyphs);
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    drawer.drawTag(out, 0, hooks);
+    requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

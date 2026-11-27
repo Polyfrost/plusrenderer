@@ -12,3 +12,6 @@ plusrenderer = { path = "../core" }
 # JNI for the `java/` library. It's the same native lib, so the C ABI (JNA) keeps working beside it.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 jni = "0.21"
+
+[dev-dependencies]
+zip = { version = "9.8.2", default-features = false }

@@ -110,7 +110,7 @@ fn app() -> impl IntoElement {
             let now = player.start.elapsed().as_secs_f32();
 
             if player.emote {
-                player.scene.play(PLAYER, now)
+                player.scene.play(PLAYER, f64::from(now))
             } else {
                 player.scene.stop(PLAYER)
             }

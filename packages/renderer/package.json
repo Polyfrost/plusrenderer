@@ -4,9 +4,22 @@
     "description": "WebGL2 adapter for the plusrenderer core",
     "type": "module",
     "main": "index.js",
+    "scripts": {
+        "test": "node --test"
+    },
     "exports": {
         ".": "./index.js",
+        "./nameplate.js": {
+            "types": "./nameplate.d.ts",
+            "default": "./nameplate.js"
+        },
+        "./nameplate-gl.js": "./nameplate-gl.js",
+        "./cosmetic.js": "./cosmetic.js",
+        "./preview.js": {
+            "types": "./preview.d.ts",
+            "default": "./preview.js"
+        },
         "./plusrenderer.wasm": "./plusrenderer.wasm"
     },
-    "files": ["index.js", "plusrenderer.wasm"]
+    "files": ["index.js", "nameplate.js", "nameplate.d.ts", "nameplate-gl.js", "cosmetic.js", "preview.js", "preview.d.ts", "plusrenderer.wasm"]
 }
